@@ -1,0 +1,47 @@
+name: Update German translation status
+
+on:
+  schedule:
+    workflow_dispatch:         # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this branch
+        uses: actions/checkout@v4
+
+      - name: Check out upstream TEI (dev)
+        uses: actions/checkout@v4
+        with:
+          repository: TEIC/TEI
+          ref: dev
+          path: upstream
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install lxml
+        run: pip install lxml
+
+      - name: Generate README
+        run: python3 translation_status.py --lang de --specs upstream/P5/Source/Specs -o README.md
+
+      - name: Commit if changed
+        run: |
+          # ignore the "Generated on <date> ... commit" line, so only real changes get committed
+          if git diff --quiet -I '^Generated on' README.md; then
+            echo "No changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "Update German translation status"
+          git push

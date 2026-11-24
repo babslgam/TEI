@@ -5,7 +5,8 @@ Reads P5/Source/Specs/*.xml directly (no build needed). For every English
 <gloss>, <desc> and <remarks> it checks whether a sibling in the target
 language exists, and whether that translation's @versionDate is older than
 the English one's. Same rules as P5/Utilities/generate_i18n_spec_lists.xsl,
-but reported per element instead of per spec.
+but reported per element instead of per spec. Missing <remarks> are listed
+in a separate, lower-priority section.
 
 Usage (from anywhere inside the TEI repo):
     python3 translation_status.py                    # German -> translation-status-de.md
@@ -126,15 +127,23 @@ def link(f) -> str:
 
 
 def render(findings, lang: str, spec_counts: Counter, commit: str) -> str:
+    def is_remarks_missing(f):
+        return f["kind"] == "missing" and f["element"] == "remarks"
+
     by_kind = defaultdict(list)
     for f in findings:
         by_kind[f["kind"]].append(f)
+    missing_main = [f for f in by_kind["missing"] if not is_remarks_missing(f)]
+    missing_remarks = [f for f in by_kind["missing"] if is_remarks_missing(f)]
 
     out = [f"# Translation status: `{lang}`", ""]
     out.append(f"Generated on {date.today().isoformat()} from TEIC/TEI"
                + (f" at commit `{commit}`" if commit else "") + ".")
     out.append("")
-    out.append("- **Missing**: English gloss/desc/remarks with no translation.")
+    out.append("- **Missing**: English gloss/desc with no translation. "
+               "These show up in editor tooltips and at the top of every reference page.")
+    out.append("- **Missing remarks**: English remarks with no translation. "
+               "Longer usage notes further down the reference pages; lower priority.")
     out.append("- **Outdated**: translation's `@versionDate` is older than the English one's.")
     out.append("- **Undated**: translation exists but has no `@versionDate` "
                "(counted as missing by the upstream XSLT).")
@@ -142,29 +151,31 @@ def render(findings, lang: str, spec_counts: Counter, commit: str) -> str:
     out.append("")
 
     # Summary per spec type
-    out += ["## Summary", "",
-            "| Type | Specs | Specs with issues | Missing | Outdated | Undated | No English |",
-            "|---|---:|---:|---:|---:|---:|---:|"]
+    def counts(fs):
+        k = Counter(f["kind"] for f in fs)
+        rem = sum(1 for f in fs if is_remarks_missing(f))
+        return k["missing"] - rem, rem, k["outdated"], k["undated"], k["no-english"]
+
+    out.extend(["## Summary", "",
+                "| Type | Specs | Specs with issues | Missing (gloss/desc) | Missing remarks "
+                "| Outdated | Undated | No English |",
+                "|---|---:|---:|---:|---:|---:|---:|---:|"])
     for t, label in SPEC_TYPES.items():
         fs = [f for f in findings if f["type"] == t]
-        k = Counter(f["kind"] for f in fs)
-        affected = len({f["spec"] for f in fs})
-        out.append(f"| {label} | {spec_counts[t]} | {affected} | {k['missing']} | "
-                   f"{k['outdated']} | {k['undated']} | {k['no-english']} |")
-    k = Counter(f["kind"] for f in findings)
-    out.append(f"| **Total** | {sum(spec_counts.values())} | "
-               f"{len({f['spec'] for f in findings})} | {k['missing']} | "
-               f"{k['outdated']} | {k['undated']} | {k['no-english']} |")
+        cells = " | ".join(str(n) for n in counts(fs))
+        out.append(f"| {label} | {spec_counts[t]} | {len({f['spec'] for f in fs})} | {cells} |")
+    cells = " | ".join(f"**{n}**" for n in counts(findings))
+    out.append(f"| **Total** | **{sum(spec_counts.values())}** | "
+               f"**{len({f['spec'] for f in findings})}** | {cells} |")
     out.append("")
 
     def table(title, rows, with_dates):
         if not rows:
             return
-        out.append(f"## {title} ({len(rows)})")
-        out.append("")
+        out.extend([f"## {title} ({len(rows)})", ""])
         if with_dates:
             out.extend(["| Where | Element | English date | Translation date | Source |",
-                    "|---|---|---|---|---|"])
+                        "|---|---|---|---|---|"])
         else:
             out.extend(["| Where | Element | Source |", "|---|---|---|"])
         for f in sorted(rows, key=lambda f: (f["spec"].lower(), f["line"])):
@@ -175,22 +186,21 @@ def render(findings, lang: str, spec_counts: Counter, commit: str) -> str:
                 out.append(f"| {f['where']} | {f['element']} | {link(f)} |")
         out.append("")
 
-    table("Outdated", by_kind["outdated"], with_dates=True)
-    table("Undated", by_kind["undated"], with_dates=True)
-    table("No English counterpart", by_kind["no-english"], with_dates=False)
-
-    # Missing grouped by spec, since there are many
-    missing = by_kind["missing"]
-    if missing:
-        out += [f"## Missing ({len(missing)})", ""]
+    def checklist(title, rows, intro=None):
+        """Missing entries grouped by spec, since there are many."""
+        if not rows:
+            return
+        out.extend([f"## {title} ({len(rows)})", ""])
+        if intro:
+            out.extend([intro, ""])
         grouped = defaultdict(list)
-        for f in missing:
+        for f in rows:
             grouped[(f["type"], f["spec"])].append(f)
         for t, label in SPEC_TYPES.items():
             specs = sorted((s for (tt, s) in grouped if tt == t), key=str.lower)
             if not specs:
                 continue
-            out += [f"### {label} ({len(specs)} specs)", ""]
+            out.extend([f"### {label} ({len(specs)} specs)", ""])
             for s in specs:
                 items = sorted(grouped[(t, s)], key=lambda f: f["line"])
                 details = ", ".join(
@@ -199,6 +209,14 @@ def render(findings, lang: str, spec_counts: Counter, commit: str) -> str:
                     for f in items)
                 out.append(f"- [ ] **{s}**: {details} – {link(items[0])}")
             out.append("")
+
+    table("Outdated", by_kind["outdated"], with_dates=True)
+    table("Undated", by_kind["undated"], with_dates=True)
+    table("No English counterpart", by_kind["no-english"], with_dates=False)
+    checklist("Missing", missing_main)
+    checklist("Missing remarks (lower priority)", missing_remarks,
+              intro="Usage notes on the reference pages. Translate these after the "
+                    "gloss/desc of the same spec.")
 
     return "\n".join(out)
 
@@ -237,7 +255,9 @@ def main():
 
     output.write_text(render(findings, args.lang, spec_counts, commit), encoding="utf-8")
     k = Counter(f["kind"] for f in findings)
-    print(f"Wrote {output}: {k['missing']} missing, {k['outdated']} outdated, "
+    rem = sum(1 for f in findings if f["kind"] == "missing" and f["element"] == "remarks")
+    print(f"Wrote {output}: {k['missing'] - rem} missing gloss/desc, {rem} missing remarks, "
+          f"{k['outdated']} outdated, "
           f"{k['undated']} undated, {k['no-english']} without English")
 
 

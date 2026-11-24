@@ -1,7 +1,7 @@
 name: Update German translation status
 
 on:
-  workflow_dispatch:         # "Run workflow" button in the Actions tab
+  workflow_dispatch:   # "Run workflow" button in the Actions tab
 
 permissions:
   contents: write
@@ -34,8 +34,10 @@ jobs:
 
       - name: Commit if changed
         run: |
-          # ignore the "Generated on <date> ... commit" line, so only real changes get committed
-          if git diff --quiet -I '^Generated on' README.md; then
+          # Commit if README.md is new; otherwise only if something besides the
+          # "Generated on <date> ... commit" line changed.
+          if git ls-files --error-unmatch README.md >/dev/null 2>&1 \
+             && git diff --quiet -I '^Generated on' README.md; then
             echo "No changes."
             exit 0
           fi

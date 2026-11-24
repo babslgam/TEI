@@ -1,8 +1,7 @@
 name: Update German translation status
 
 on:
-  schedule:
-    workflow_dispatch:         # "Run workflow" button in the Actions tab
+  workflow_dispatch:         # "Run workflow" button in the Actions tab
 
 permissions:
   contents: write
